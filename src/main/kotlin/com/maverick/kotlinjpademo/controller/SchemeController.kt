@@ -3,24 +3,20 @@ package com.maverick.kotlinjpademo.controller
 import com.maverick.kotlinjpademo.DTO.ClientSchemeDTO
 import com.maverick.kotlinjpademo.DTO.ClientSchemeServiceDTO
 import com.maverick.kotlinjpademo.DTO.MasterServiceDTO
+import com.maverick.kotlinjpademo.exceptionHandler.GlobalApiResponse
+import com.maverick.kotlinjpademo.mapper.ClientSchemeServiceMapper
 import com.maverick.kotlinjpademo.model.ClientScheme
 import com.maverick.kotlinjpademo.model.ClientSchemeService
 import com.maverick.kotlinjpademo.model.MasterService
 import com.maverick.kotlinjpademo.repo.ClientSchemeRepo
 import com.maverick.kotlinjpademo.repo.ClientSchemeServiceRepo
 import com.maverick.kotlinjpademo.repo.MasterServiceRepo
+import org.hibernate.MappingException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
-import java.lang.IllegalArgumentException
-import java.util.*
 import javax.websocket.server.PathParam
-import kotlin.collections.ArrayList
 
-
-/*
-import com.maverick.kotlinjpademo.repo.ClientSchemeServiceRepo
-*/
 
 /**
  * @Project kotlin-jpa-demo
@@ -28,10 +24,11 @@ import com.maverick.kotlinjpademo.repo.ClientSchemeServiceRepo
  */
 @RestController
 @RequestMapping("/api/")
-class TestController(
+class SchemeController(
     var clientSchemeRepo: ClientSchemeRepo,
     var masterServiceRepo: MasterServiceRepo,
-    var clientSchemeServiceRepo: ClientSchemeServiceRepo
+    var clientSchemeServiceRepo: ClientSchemeServiceRepo,
+    var clientSchemeServiceMapper: ClientSchemeServiceMapper
 ) {
 
     //Master service
@@ -52,7 +49,6 @@ class TestController(
             isAvailable = masterServiceDTO.isAvailable
 
             return ResponseEntity.ok(masterServiceRepo.save(masterService))
-
         }
     }
 
@@ -64,7 +60,6 @@ class TestController(
     //Client scheme
     @GetMapping("/get-client-schemes")
     fun getAllClientSchemes(): ResponseEntity<Any> {
-        var clientSchemeL: MutableList<ClientScheme> = clientSchemeRepo.findAll()
         return ResponseEntity.ok(clientSchemeRepo.findAll())
     }
 
@@ -85,14 +80,49 @@ class TestController(
     //Client scheme service
     @PostMapping("/create-client-scheme-service")
     fun createClientSchemeService(@RequestBody clientSchemeServiceDTO: ClientSchemeServiceDTO): ResponseEntity<Any> {
-        //save when clientSchemeServiceDTO.id == null
-        if(clientSchemeServiceDTO.id == null){
+
+        if (clientSchemeServiceDTO.id == null) {
+            //validating clientSchemeId
             val newClientScheme: ClientScheme =
-                clientSchemeRepo.findById(clientSchemeServiceDTO.clientSchemeId).get()
+                clientSchemeRepo.findById(clientSchemeServiceDTO.clientSchemeId)
+                    .orElseThrow { NoSuchElementException("Client schemeId ${clientSchemeServiceDTO.clientSchemeId} does not exist!!") }
 
+            //validating masterServiceIds
             val newClientSchemeServiceL: ArrayList<ClientSchemeService> = arrayListOf()
+            val validMasterServiceIds: ArrayList<Int> = arrayListOf()
+            val invalidMasterServiceIds: ArrayList<Int> = arrayListOf()
 
-            masterServiceRepo.findAllById(clientSchemeServiceDTO.masterServiceIds).stream()
+            clientSchemeServiceDTO.masterServiceIds.stream()
+                .forEach {
+                    if (masterServiceRepo.findById(it).isPresent) {
+                        validMasterServiceIds.add(it)
+                    } else {
+                        invalidMasterServiceIds.add(it)
+                    }
+                }
+            if (invalidMasterServiceIds.isNotEmpty()) {
+                throw NoSuchElementException("Master service id: $invalidMasterServiceIds are invalid!!")
+            }
+
+            //validating existing master service(s) of clientSchemeid from reqDTO
+            val existingMasterServiceIds: List<Int> =
+                clientSchemeServiceMapper.getClientSchemes(clientSchemeServiceDTO.clientSchemeId)
+
+            existingMasterServiceIds.forEach { existingId ->
+                validMasterServiceIds.forEach { validId ->
+                    if (existingId == validId) {
+                        invalidMasterServiceIds.add(validId)
+                    }
+                }
+            }
+            if (invalidMasterServiceIds.isNotEmpty()) {
+                throw MappingException(
+                    "Master service id: $invalidMasterServiceIds are already mapped to Client Scheme Id: " +
+                            "${clientSchemeServiceDTO.clientSchemeId}!!"
+                )
+            }
+            masterServiceRepo.findAllById(validMasterServiceIds).stream()
+                .distinct()
                 .forEach {
                     val clientSchemeService = ClientSchemeService()
                     with(clientSchemeService) {
@@ -108,8 +138,8 @@ class TestController(
                     newClientSchemeServiceL.add(clientSchemeService)
                 }
             return ResponseEntity(clientSchemeServiceRepo.saveAll(newClientSchemeServiceL), HttpStatus.CREATED)
-        }else{
-            return ResponseEntity("Create operation does not require " + clientSchemeServiceDTO.id + " !!", HttpStatus.BAD_REQUEST)
+        } else {
+            throw IllegalArgumentException("Create operation does not require key: id!!")
         }
     }
 }

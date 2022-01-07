@@ -9,9 +9,9 @@ import java.sql.Date
  */
 data class MasterServiceDTO(
     var isActive: Boolean,
-     var serviceCode: String,
+    var serviceCode: String,
     var serviceNameLoc: String,
-     var description: String,
-     var isAvailable: Boolean,
-     var clientScheme: ClientScheme?
+    var description: String,
+    var isAvailable: Boolean,
+    var clientScheme: ClientScheme?
 )
